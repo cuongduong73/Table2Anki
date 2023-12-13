@@ -1,134 +1,216 @@
-import { App, Editor, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting } from 'obsidian';
+import { Plugin, Notice } from 'obsidian';
+import { marked } from 'marked';
+import axios from 'axios'
 
-// Remember to rename these classes and interfaces!
-
-interface MyPluginSettings {
-	mySetting: string;
+interface IAnkiTable { 
+    [key: string]: string; 
 }
 
-const DEFAULT_SETTINGS: MyPluginSettings = {
-	mySetting: 'default'
+const ANKI_CONNECT_ENDPOINT = 'http://localhost:8765';
+
+async function createAnkiNote(deck: string, cardContent: IAnkiTable) {
+    try {
+        const requestData = {
+            action: "addNote",
+            version: 6,
+            params: {
+                note: {
+                    deckName: deck,
+                    modelName: "Obsidian",
+                    fields: cardContent
+                }
+            }
+        };
+        console.log(requestData);
+        const response = await axios.post(ANKI_CONNECT_ENDPOINT, requestData);
+        return response
+    } catch (error) {
+        console.error(error);
+    }
 }
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
-
-	async onload() {
-		await this.loadSettings();
-
-		// This creates an icon in the left ribbon.
-		const ribbonIconEl = this.addRibbonIcon('dice', 'Sample Plugin', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-		// Perform additional things with the ribbon
-		ribbonIconEl.addClass('my-plugin-ribbon-class');
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status Bar Text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-sample-modal-simple',
-			name: 'Open sample modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'sample-editor-command',
-			name: 'Sample editor command',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				console.log(editor.getSelection());
-				editor.replaceSelection('Sample Editor Command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-sample-modal-complex',
-			name: 'Open sample modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			console.log('click', evt);
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-	}
-
-	onunload() {
-
-	}
-
-	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-	}
-
-	async saveSettings() {
-		await this.saveData(this.settings);
-	}
+async function updateAnkiNote(id: number, cardContent: IAnkiTable) {
+    try {
+        const requestData = {
+            action: "updateNote",
+            version: 6,
+            params: {
+                note: {
+                    id: id,
+                    fields: cardContent
+                }
+            }
+        };
+        console.log(requestData);
+        const response = await axios.post(ANKI_CONNECT_ENDPOINT, requestData);
+        return response
+    } catch (error) {
+        console.error(error);
+    }
 }
 
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		const {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
-	}
+async function findAnkiNote(id: string): Promise<number> {
+    try {
+        const requestData = {
+            action: "findNotes",
+            version: 6,
+            params: {
+                query: `ID:${id}`
+            }
+        };
+        const response = await axios.post(ANKI_CONNECT_ENDPOINT, requestData);
+        if (response.status === 200) {
+            if(response.data["result"].length) {
+                return response.data["result"][0];
+            }
+        }
+        return 0;
+    } catch (error) {
+        console.error(error);
+        return 0;
+    }
 }
 
-class SampleSettingTab extends PluginSettingTab {
-	plugin: MyPlugin;
+async function isDeckExist(deckName: string): Promise<boolean> {
+    try {
+        const requestData = {
+            action: "deckNames",
+            version: 6
+        };
+        const response = await axios.post(ANKI_CONNECT_ENDPOINT, requestData);
+        if (response.status === 200) {
+            const deckNames = response.data['result'];
+            for (let i=0; i < deckNames.length; i++) {
+                if (deckNames[i] === deckName) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    } catch (error) {
+        console.error(error);
+        return false;
+    }
+}
 
-	constructor(app: App, plugin: MyPlugin) {
-		super(app, plugin);
-		this.plugin = plugin;
-	}
+async function createDeck(deckName: string): Promise<void> {
+    try {
+        const requestData = {
+            action: "createDeck",
+            version: 6, 
+            params: {
+                deck: deckName
+            }
+        };
+        console.log(requestData);
+        const response =  await axios.post(ANKI_CONNECT_ENDPOINT, requestData);
+        if (response.status === 200) {
+            console.log(`Created deck: ${deckName}`)
+        }
+    } catch (error) {
+        console.error(error);
+    }
+}
 
-	display(): void {
-		const {containerEl} = this;
+function convertMarkdownToHTML(input: string): string {
+    // Convert **text** to <b>text</b>
+    let  converted = input.replace(/\*\*(.*?)\*\*/g, '<b>$1</b>');
 
-		containerEl.empty();
+    // Convert *text* to <b>text</b>
+    converted = converted.replace(/\*(.*?)\*/g, '<i>$1</i>');
 
-		new Setting(containerEl)
-			.setName('Setting #1')
-			.setDesc('It\'s a secret')
-			.addText(text => text
-				.setPlaceholder('Enter your secret')
-				.setValue(this.plugin.settings.mySetting)
-				.onChange(async (value) => {
-					this.plugin.settings.mySetting = value;
-					await this.plugin.saveSettings();
-				}));
-	}
+    // Convert _text_ to <i>text</i>
+    converted = converted.replace(/_(.*?)_/g, '<i>$1</i>');
+
+    return converted;
+}
+
+function trimMarkdownStyle(input: string): string {
+    // trim **text**
+    let converted = input.replace(/\*\*(.*?)\*\*/g, '$1');
+
+    // trim _text_
+    converted = converted.replace(/_(.*?)_/g, '$1');
+
+    return converted;
+}
+
+export default class AnkiPlugin extends Plugin {
+
+
+    onload(): void {
+        console.log("AnkiPlugin")
+        this.addCommand({
+            id: "export-table-to-anki",
+            name: "Export table to Anki",
+            callback: async () => {
+                const currActiveFile = this.app.workspace.getActiveFile();
+                if (currActiveFile) {
+                    const fileURL = `obsidian://open?vault=${encodeURIComponent(this.app.vault.getName())}&file=${encodeURIComponent(currActiveFile.path)}`;
+
+                    // extract target deck
+                    const content = await this.app.vault.read(currActiveFile);
+                    const deckMatch = content.match(/deck:\s(.*?)\n/);
+                    let targetDeck = "";
+                    if (deckMatch) {
+                        targetDeck = deckMatch[1];
+                        console.log("Target Deck:", targetDeck);
+                    } else {
+                        console.log("Deck field not found");
+                    }
+
+                    const tokens = marked.lexer(content);
+
+                    tokens.forEach(token => {
+                        if (token.type === 'table') {
+                            console.log(token);
+                            const tableContent: Array<IAnkiTable> = [];
+                            const wordlist: Array<string> = [];
+                            token.rows.forEach((term: Array<{ text: string, tokens?: [] }>) => {
+                                const tableRow: { [key: string]: string } = {};
+                                for (let i = 0; i < token.header.length; i++) {
+                                    if (token.header[i].text === 'Word') {
+                                        if (term[i].text === '') {
+                                            term[i].text = tableContent[tableContent.length - 1][token.header[i].text]
+                                        } else {
+                                            wordlist.push(trimMarkdownStyle(term[i].text));
+                                        }
+                                        
+                                        tableRow[token.header[i].text] = trimMarkdownStyle(term[i].text);
+
+                                    } else {
+                                        tableRow[token.header[i].text] = convertMarkdownToHTML(term[i].text);
+                                    }
+                                }
+                                tableRow['Obsidian'] = fileURL;
+                                tableContent.push(tableRow);
+                            })
+                            // console.log(tableContent);
+                            // console.log(isDeckExist(targetDeck))
+                            isDeckExist(targetDeck).then(result => {
+                                if(!result) {
+                                    createDeck(targetDeck);
+                                }
+                                tableContent.forEach(term => {
+                                    // create related field for multiple choices
+                                    term["Related"] = wordlist.filter((item) => item !== term["Word"]).join(", ");
+                                    term["Logo"] = "<img class='obsidian' src='obsidian-logo.png'>";
+                                    findAnkiNote(term["ID"]).then(id => {
+                                        if(id) {
+                                            updateAnkiNote(id, term);
+                                        } else {
+                                            createAnkiNote(targetDeck, term);
+                                        }
+                                    })
+                                    
+                                })
+                                new Notice(`Sync ${tableContent.length} notes to Anki!`)
+                            })
+                        }
+                    });
+
+                }
+            }
+        })
+    }
 }
